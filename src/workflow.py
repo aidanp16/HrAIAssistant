@@ -39,7 +39,6 @@ class HRAssistantWorkflow:
         # Add nodes
         workflow.add_node("initial_analysis", self._initial_analysis_wrapper)
         workflow.add_node("question_generation", self._question_generation_wrapper)
-        workflow.add_node("response_processing", self._response_processing_wrapper)
         workflow.add_node("content_generation_coordinator", self._content_coordinator_wrapper)
         workflow.add_node("content_generation", self._content_generation_wrapper)
         workflow.add_node("completion", self._completion_wrapper)
@@ -62,15 +61,6 @@ class HRAssistantWorkflow:
             self._route_after_questions,
             {
                 "wait_for_response": END,
-                "content_generation_coordinator": "content_generation_coordinator"
-            }
-        )
-        
-        workflow.add_conditional_edges(
-            "response_processing",
-            self._route_after_response,
-            {
-                "question_generation": "question_generation",
                 "content_generation_coordinator": "content_generation_coordinator"
             }
         )
@@ -190,17 +180,30 @@ class HRAssistantWorkflow:
         current_state = self.graph.get_state(config)
         
         if current_state and current_state.values:
-            # Add user response to state
+            # Process the response directly
+            from .nodes import response_processing_node
+            
+            # Add user response to current state
             updated_state = dict(current_state.values)
             updated_state["user_response"] = user_response
-            updated_state["pending_user_response"] = False
             
-            # Continue from response processing
-            result = self.graph.invoke(
-                updated_state, 
-                config,
-                start="response_processing"
-            )
+            # Process the response
+            response_result = response_processing_node(updated_state, user_response)
+            
+            # Update state with processed response
+            for key, value in response_result.items():
+                updated_state[key] = value
+            
+            # Continue the workflow if ready for content generation
+            if updated_state.get("ready_for_generation", False):
+                result = self.graph.invoke(updated_state, config)
+            else:
+                # Continue with question generation
+                from .nodes import question_generation_node
+                question_result = question_generation_node(updated_state)
+                for key, value in question_result.items():
+                    updated_state[key] = value
+                result = updated_state
             
             return result
         else:

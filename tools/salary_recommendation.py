@@ -12,7 +12,7 @@ from config.prompts import SALARY_RECOMMENDATION_PROMPT
 load_dotenv()
 
 llm = ChatOpenAI(
-    model="gpt-5-mini",
+    model="gpt-4o-mini",
     temperature=0.2,
     openai_api_key=os.getenv("OPENAI_API_KEY")
 )
