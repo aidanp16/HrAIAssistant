@@ -34,7 +34,7 @@ User Input → GPT Analysis → Question Generation → Context Gathering → Co
 ## 🛠️ Tech Stack
 
 - **LangGraph**: Workflow orchestration
-- **OpenAI GPT**: Content generation and analysis
+- **OpenAI GPT-5-mini**: Content generation and analysis
 - **Streamlit**: Web interface
 - **Python**: Core application logic
 - **TypedDict**: State schema management
@@ -207,7 +207,7 @@ The application uses a sophisticated LangGraph workflow:
 ### Component Overview
 
 - **State Management (`src/state.py`):** TypedDict-based state with comprehensive tracking
-- **Workflow Nodes (`src/nodes.py`):** GPT-powered analysis, question generation, and routing
+- **Workflow Nodes (`src/nodes.py`):** GPT-5-mini-powered analysis, question generation, and routing
 - **Content Tools (`tools/`):** Individual generators for each content type
 - **Session Management (`src/session_manager.py`):** File-based persistence with cleanup
 - **Streamlit Frontend (`src/app.py`):** Professional web interface with chat-style interaction
@@ -303,7 +303,7 @@ hr_assistant/
 │   ├── salary_recommendation.py
 │   └── interview_questions.py
 ├── config/
-│   └── prompts.py          # GPT prompt templates
+│   └── prompts.py          # GPT-5-mini prompt templates
 ├── output/                 # Generated markdown files
 ├── sessions/               # Session persistence storage
 ├── requirements.txt        # Python dependencies
@@ -349,7 +349,7 @@ DEBUG=True streamlit run src/app.py
 
 ## 🎯 Key Features Demonstrated
 
-✅ **Multi-step reasoning** - GPT analyzes needs, asks follow-ups, makes decisions  
+✅ **Multi-step reasoning** - GPT-5-mini analyzes needs, asks follow-ups, makes decisions
 ✅ **LangGraph orchestration** - Complex workflow with conditional routing  
 ✅ **Session persistence** - File-based state management across sessions  
 ✅ **Modular tools** - Individual content generators as separate modules  

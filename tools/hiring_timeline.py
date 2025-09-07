@@ -12,7 +12,7 @@ from config.prompts import HIRING_TIMELINE_PROMPT
 load_dotenv()
 
 llm = ChatOpenAI(
-    model="gpt-4",
+    model="gpt-5-mini",
     temperature=0.2,
     openai_api_key=os.getenv("OPENAI_API_KEY")
 )

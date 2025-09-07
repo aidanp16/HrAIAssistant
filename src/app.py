@@ -83,7 +83,7 @@ class HRAssistantApp:
             st.header("ℹ️ About")
             st.markdown("""
             **HR Assistant** uses:
-            - 🧠 **GPT-4** for intelligent content generation
+            - 🧠 **GPT-5-mini** for intelligent content generation
             - 🔄 **LangGraph** for workflow orchestration  
             - 💾 **Session Persistence** to save your progress
             - 📁 **File Export** for all generated materials
