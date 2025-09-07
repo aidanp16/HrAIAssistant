@@ -139,7 +139,20 @@ def response_processing_node(state: ConversationState, user_response: str) -> Di
     
     try:
         response = llm.invoke([HumanMessage(content=prompt)])
-        updates_data = json.loads(response.content)
+        print(f"GPT Response: {response.content}")
+        
+        # Clean the response content to ensure valid JSON
+        content = response.content.strip()
+        
+        # Try to extract JSON if there's extra text
+        if content.startswith('```json'):
+            content = content[7:]
+        if content.endswith('```'):
+            content = content[:-3]
+        
+        content = content.strip()
+        
+        updates_data = json.loads(content)
         
         # Update company info
         company_info = dict(state["company_info"])
@@ -195,15 +208,24 @@ def response_processing_node(state: ConversationState, user_response: str) -> Di
         
     except Exception as e:
         print(f"Error processing response: {e}")
-        return {
+        # If JSON parsing fails, acknowledge the response but mark as needing more info
+        result = {
             "pending_user_response": False,
             "current_questions": None,
-            "stage": WorkflowStage.ASKING_QUESTIONS,
             "messages": state["messages"] + [
                 {"role": "user", "content": user_response},
-                {"role": "assistant", "content": "I understand. Let me ask a few more questions to help you better."}
+                {"role": "assistant", "content": "Thanks for that information! Let me see if I need any additional details to create the best hiring materials for you."}
             ]
         }
+        
+        # Check if we have enough information with current state
+        if is_information_sufficient(state):
+            result["stage"] = WorkflowStage.GENERATING_CONTENT
+            result["ready_for_generation"] = True
+        else:
+            result["stage"] = WorkflowStage.ASKING_QUESTIONS
+        
+        return result
 
 
 def content_generation_coordinator_node(state: ConversationState) -> Dict[str, Any]:

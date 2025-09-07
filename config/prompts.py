@@ -58,56 +58,72 @@ Generate questions that are:
 2. Relevant to startup hiring
 3. Help determine budget, timeline, and requirements
 4. Natural and conversational
+5. When multiple roles are involved, ask about them specifically
+
+IMPORTANT: If there are multiple job roles, ask about budget/requirements for EACH role separately.
 
 Focus on the most important missing information first. Return only the questions as a JSON list:
 
 ["Question 1?", "Question 2?", "Question 3?"]
 
-Make the questions startup-friendly and practical. Examples of good questions:
+Examples of good questions:
 - "What's your company size and current funding stage?"
-- "What's your budget range for this role (salary + equity)?"
-- "How quickly do you need to fill this position?"
-- "What are the must-have vs nice-to-have skills for this role?"
+- "What's your budget range for the founding engineer role specifically?"
+- "What's your budget range for the GenAI intern position?"
+- "How quickly do you need to fill these positions?"
+- "What are the must-have technical skills for the founding engineer?"
+- "What level of AI/ML experience do you need for the intern role?"
 """
 
 
 RESPONSE_PROCESSING_PROMPT = """
-You are an HR Assistant processing a user's response to questions about their hiring needs. 
+You are an HR Assistant processing a user's response to hiring questions. 
 
-Previous questions asked: {questions}
+Previous questions: {questions}
 User's response: "{user_response}"
 Current company info: {company_info}
 Current job roles: {job_roles}
 
-Extract any new information from the user's response and return updates in this JSON format:
+Analyze the user's response and extract ANY new information they provided. Return ONLY valid JSON in this exact format:
+
 {{
     "company_info_updates": {{
-        "name": "updated value or null to keep current",
-        "size": "updated value or null to keep current",
-        "stage": "updated value or null to keep current",
-        "industry": "updated value or null to keep current",
-        "location": "updated value or null to keep current",
-        "remote_policy": "updated value or null to keep current",
-        "budget_range": "updated value or null to keep current",
-        "timeline": "updated value or null to keep current"
+        "size": null,
+        "stage": null,
+        "industry": null,
+        "location": null,
+        "remote_policy": null,
+        "budget_range": null,
+        "timeline": null
     }},
-    "job_role_updates": [
-        {{
-            "index": 0,
-            "updates": {{
-                "seniority_level": "updated value or null",
-                "department": "updated value or null",
-                "specific_skills": ["updated skills list or null"]
-            }}
-        }}
-    ],
-    "additional_roles": [
-        // Any new roles mentioned in the response
-    ]
+    "job_role_updates": [],
+    "additional_roles": []
 }}
 
-Only include fields that have updates. Use null for fields that should remain unchanged.
-Parse the response carefully to extract all relevant information, including implicit details.
+IMPORTANT RULES:
+1. Replace null with actual values ONLY if the user provided that information
+2. Keep null for any field the user didn't mention
+3. For budget_range, capture salary ranges like "120k-150k" or "$80k-120k"
+4. For timeline, capture urgency like "6-8 weeks" or "ASAP" or "2 months"
+5. For size, use formats like "100 employees" or "50-person team"
+6. For stage, capture funding like "Series B" or "Seed stage"
+7. Return ONLY the JSON, no other text
+8. Do not include comments in the JSON
+
+Example response for "We're a 100 employee Series B company, budget is 120k-150k, need to fill in 6-8 weeks":
+{{
+    "company_info_updates": {{
+        "size": "100 employees",
+        "stage": "Series B",
+        "industry": null,
+        "location": null,
+        "remote_policy": null,
+        "budget_range": "$120k-150k",
+        "timeline": "6-8 weeks"
+    }},
+    "job_role_updates": [],
+    "additional_roles": []
+}}
 """
 
 
