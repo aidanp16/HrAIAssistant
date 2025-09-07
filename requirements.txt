@@ -1,0 +1,21 @@
+# Core dependencies
+langgraph==0.2.34
+langchain==0.3.0
+langchain-openai==0.2.0
+openai==1.51.0
+
+# Frontend
+streamlit==1.39.0
+
+# Utilities
+python-dotenv==1.0.1
+pydantic==2.9.2
+typing-extensions==4.12.2
+
+# File handling
+PyYAML==6.0.2
+markdown==3.7
+
+# Development
+pytest==8.3.3
+black==24.8.0
