@@ -616,8 +616,6 @@ class HRAssistantApp:
         try:
             # Step 1: Process response and get intermediate state
             with st.spinner("Processing your response..."):
-                # CRITICAL FIX: Use current session state instead of LangGraph state
-                # The LangGraph checkpointer might have stale state, but our session state has the latest
                 if st.session_state.current_state:
                     # Import nodes for manual processing
                     from src.nodes import response_processing_node, content_generation_coordinator_node
@@ -632,7 +630,6 @@ class HRAssistantApp:
                     for key, value in response_result.items():
                         updated_state[key] = value
                     
-                    # CRITICAL: Always run role completion check after processing response
                     from src.nodes import role_completion_check_node, role_focus_node, question_generation_node
                     
                     role_check_result = role_completion_check_node(updated_state)

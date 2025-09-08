@@ -366,8 +366,6 @@ def response_processing_node(state: ConversationState, user_response: str) -> Di
         job_roles = list(state["job_roles"])
         current_index = state.get("current_role_index", 0)
         
-        # CRITICAL FIX: Only update the current role, ignore GPT's suggested indices
-        # The GPT doesn't have proper context about which role is currently being processed
         for role_update in updates_data.get("job_role_updates", []):
             role_updates = role_update.get("updates", {})
             
@@ -396,7 +394,6 @@ def response_processing_node(state: ConversationState, user_response: str) -> Di
             "job_roles": job_roles,
             "pending_user_response": False,
             "current_questions": None,
-            # CRITICAL: Preserve existing state values
             "current_role_index": state.get("current_role_index", 0),
             "role_completion_status": state.get("role_completion_status", []),
             "messages": state["messages"] + [
@@ -416,7 +413,6 @@ def response_processing_node(state: ConversationState, user_response: str) -> Di
         result = {
             "pending_user_response": False,
             "current_questions": None,
-            # CRITICAL: Preserve existing state values even in fallback
             "current_role_index": state.get("current_role_index", 0),
             "role_completion_status": state.get("role_completion_status", []),
             "messages": state["messages"] + [
