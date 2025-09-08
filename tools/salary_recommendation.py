@@ -24,6 +24,9 @@ def generate_salary_recommendation(role_info: Dict[str, Any], company_info: Dict
     
     prompt = SALARY_RECOMMENDATION_PROMPT.format(
         company_name=company_info.get("name", "Our Company"),
+        company_description=company_info.get("description", "An innovative company making a difference in our industry"),
+        company_values=company_info.get("values", "Innovation, collaboration, and excellence"),
+        company_mission=company_info.get("mission", "Building solutions that matter"),
         company_size=company_info.get("size", "Early-stage startup"),
         company_stage=company_info.get("stage", "Growing startup"),
         location=company_info.get("location", "Remote-friendly"),
@@ -76,16 +79,22 @@ def generate_salary_recommendation(role_info: Dict[str, Any], company_info: Dict
 """
 
 
-def save_salary_recommendation(content: str, role_title: str, output_dir: str = "output") -> str:
+def save_salary_recommendation(content: str, role_title: str, output_dir: str = "output", session_id: str = None) -> str:
     """Save salary recommendation to a markdown file."""
     import os
     
-    os.makedirs(output_dir, exist_ok=True)
+    # Create session-specific subdirectory if session_id provided
+    if session_id:
+        session_output_dir = os.path.join(output_dir, session_id)
+    else:
+        session_output_dir = output_dir
+    
+    os.makedirs(session_output_dir, exist_ok=True)
     safe_title = "".join(c for c in role_title if c.isalnum() or c in (' ', '-', '_')).rstrip()
     safe_title = safe_title.replace(' ', '_').lower()
     
     filename = f"salary_recommendation_{safe_title}.md"
-    filepath = os.path.join(output_dir, filename)
+    filepath = os.path.join(session_output_dir, filename)
     
     try:
         with open(filepath, 'w', encoding='utf-8') as f:

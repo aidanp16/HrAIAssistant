@@ -42,8 +42,18 @@ Thumbs.db
 
 # Application specific
 sessions/*.json
-output/*.md
+output/**/*.md
+output/*/
 *.log
+
+# Database files (user-specific data, should not be shared)
+*.db
+*.sqlite
+*.sqlite3
+checkpoints.db
+
+# Company profile (user-specific data, should not be shared)
+company_profile.json
 
 # Streamlit
 .streamlit/secrets.toml

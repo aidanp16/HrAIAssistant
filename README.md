@@ -4,8 +4,8 @@ An intelligent HR assistant that helps startups plan their hiring process using 
 
 ## 🚀 Features
 
-- **Intelligent Question Generation**: GPT-powered contextual questions to gather hiring requirements
-- **Multi-Role Support**: Handle multiple positions in a single conversation
+- **Intelligent Question Generation**: GPT-powered contextual questions focused on one role at a time
+- **Role-by-Role Processing**: Sequential, focused conversations for each position to reduce complexity
 - **Comprehensive Content Generation**:
   - Job descriptions tailored for startups
   - Hiring checklists with actionable items
@@ -21,7 +21,7 @@ An intelligent HR assistant that helps startups plan their hiring process using 
 The application uses **LangGraph** to orchestrate a multi-step workflow:
 
 ```
-User Input → GPT Analysis → Question Generation → Context Gathering → Content Generation → Output Files
+User Input → GPT Analysis → Role Focus → Role-Specific Questions → Role Completion Check → Next Role or Content Generation → Output Files
 ```
 
 ### Key Components
@@ -95,7 +95,8 @@ streamlit run src/app.py
 
 **The assistant will**:
 - Extract the job roles (Founding Engineer, GenAI Intern)
-- Ask clarifying questions about company size, budget, timeline
+- Focus on **Founding Engineer** first with 3 targeted questions
+- Once complete, move to **GenAI Intern** with 3 targeted questions  
 - Generate comprehensive hiring materials for each role
 
 ## 🔧 Development Status
@@ -193,11 +194,23 @@ The application uses a sophisticated LangGraph workflow:
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│ Initial         │────│ Question         │────│ Response        │
-│ Analysis        │    │ Generation       │    │ Processing      │
+│ Initial         │────│ Role Focus       │────│ Role-Specific   │
+│ Analysis        │    │ (Introduce Role) │    │ Questions       │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
          │                       │                       │
-         ▼                       ▼                       ▼
+         │                       ▼                       ▼
+         │              ┌──────────────────┐    ┌─────────────────┐
+         │              │ Response         │────│ Role Completion │
+         │              │ Processing       │    │ Check           │
+         │              └──────────────────┘    └─────────────────┘
+         │                                             │
+         │                                             ▼
+         │                                    ┌─────────────────┐
+         │                                    │ Next Role or    │
+         │                                    │ Content Gen     │
+         │                                    └─────────────────┘
+         │                                             │
+         ▼                                             ▼
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
 │ Content         │────│ Content          │────│ Completion      │
 │ Coordination    │    │ Generation       │    │                 │

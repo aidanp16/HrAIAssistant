@@ -2,12 +2,17 @@
 
 import json
 import os
-from typing import Dict, Any
+from typing import Dict, Any, List
 from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage
 from dotenv import load_dotenv
 
-from .state import ConversationState, WorkflowStage, JobRole, is_information_sufficient, get_missing_information
+from .state import (
+    ConversationState, WorkflowStage, JobRole, 
+    is_information_sufficient, get_missing_information,
+    is_role_information_sufficient, get_missing_information_for_role,
+    get_current_role, are_all_roles_complete
+)
 from config.prompts import (
     INITIAL_ANALYSIS_PROMPT,
     QUESTION_GENERATION_PROMPT, 
@@ -35,7 +40,24 @@ def initial_analysis_node(state: ConversationState) -> Dict[str, Any]:
     
     try:
         response = llm.invoke([HumanMessage(content=prompt)])
-        analysis = json.loads(response.content)
+        
+        # Clean the response content to ensure valid JSON
+        content = response.content.strip()
+        
+        # Try to extract JSON if there's extra text
+        if content.startswith('```json'):
+            content = content[7:]
+        if content.endswith('```'):
+            content = content[:-3]
+        if content.startswith('```'):
+            content = content[3:]
+        
+        content = content.strip()
+        
+        if not content:
+            raise ValueError("Empty response from GPT")
+            
+        analysis = json.loads(content)
         
         # Extract job roles
         job_roles = []
@@ -45,6 +67,8 @@ def initial_analysis_node(state: ConversationState) -> Dict[str, Any]:
                 seniority_level=role_data.get("seniority_level"),
                 department=role_data.get("department"),
                 specific_skills=role_data.get("specific_skills"),
+                budget_range=None,  # Will be filled in by response processing
+                timeline=None,      # Will be filled in by response processing
                 generated_content=None
             )
             job_roles.append(job_role)
@@ -56,74 +80,95 @@ def initial_analysis_node(state: ConversationState) -> Dict[str, Any]:
             if value is not None:
                 updated_company[key] = value
         
+        # Initialize role completion tracking
+        role_completion_status = [False] * len(job_roles)
+        
         # Update conversation state
         updates = {
             "job_roles": job_roles,
             "company_info": updated_company,
+            "current_role_index": 0,
+            "role_completion_status": role_completion_status,
             "stage": WorkflowStage.ASKING_QUESTIONS if analysis.get("needs_more_info", True) else WorkflowStage.GENERATING_CONTENT,
             "messages": state["messages"] + [
-                {"role": "user", "content": state["original_request"]},
-                {"role": "assistant", "content": f"I found {len(job_roles)} role(s) to help you with: {', '.join([role['title'] for role in job_roles])}"}
+                {"role": "user", "content": state["original_request"]}
             ]
         }
         
         return updates
         
+    except json.JSONDecodeError as e:
+        print(f"JSON decode error in initial analysis: {e}")
+        print(f"Content that failed to parse: '{content}'")
+        return _get_initial_analysis_fallback(state)
     except Exception as e:
-        print(f"Error in initial analysis: {e}")
-        return {
-            "stage": WorkflowStage.ASKING_QUESTIONS,
-            "messages": state["messages"] + [
-                {"role": "user", "content": state["original_request"]},
-                {"role": "assistant", "content": "I'll help you with your hiring needs. Let me ask a few questions to get started."}
-            ]
-        }
+        print(f"General error in initial analysis: {e}")
+        return _get_initial_analysis_fallback(state)
 
 
 def question_generation_node(state: ConversationState) -> Dict[str, Any]:
     """
-    Generate contextual questions based on missing information.
+    Generate contextual questions for the current role only.
     """
-    missing_info = get_missing_information(state)
+    current_role = get_current_role(state)
+    current_index = state.get("current_role_index", 0)
+    
+    if not current_role:
+        # No current role, shouldn't happen but handle gracefully
+        return {
+            "stage": WorkflowStage.GENERATING_CONTENT,
+            "ready_for_generation": True
+        }
+    
+    missing_info = get_missing_information_for_role(current_role)
     
     prompt = QUESTION_GENERATION_PROMPT.format(
         original_request=state["original_request"],
-        job_roles=json.dumps([dict(role) for role in state["job_roles"]], indent=2),
+        current_role=json.dumps(dict(current_role), indent=2),
+        current_role_title=current_role["title"],
         company_info=json.dumps(dict(state["company_info"]), indent=2),
         missing_info=json.dumps(missing_info, indent=2)
     )
     
     try:
         response = llm.invoke([HumanMessage(content=prompt)])
-        questions = json.loads(response.content)
         
+        # Clean the response content to ensure valid JSON
+        content = response.content.strip()
+        
+        # Try to extract JSON if there's extra text
+        if content.startswith('```json'):
+            content = content[7:]
+        if content.endswith('```'):
+            content = content[:-3]
+        if content.startswith('```'):
+            content = content[3:]
+        
+        content = content.strip()
+        
+        if not content:
+            raise ValueError("Empty response from GPT")
+            
+        questions = json.loads(content)
+        
+        role_title = current_role["title"]
         return {
             "current_questions": questions,
             "pending_user_response": True,
             "missing_info": missing_info,
             "messages": state["messages"] + [
-                {"role": "assistant", "content": f"I need some more information to create the best hiring materials for you. Here are a few questions:\n\n" + 
+                {"role": "assistant", "content": f"I need some more details about the **{role_title}** role to create the best hiring materials:\n\n" + 
                  "\n".join([f"{i+1}. {q}" for i, q in enumerate(questions)])}
             ]
         }
         
+    except json.JSONDecodeError as e:
+        print(f"JSON decode error in question generation: {e}")
+        print(f"Content that failed to parse: '{content}'")
+        return _get_question_generation_fallback(state, missing_info)
     except Exception as e:
-        print(f"Error generating questions: {e}")
-        # Fallback questions
-        fallback_questions = [
-            "What's your company size and current funding stage?",
-            "What's your budget range for these roles?",
-            "How quickly do you need to fill these positions?"
-        ]
-        return {
-            "current_questions": fallback_questions,
-            "pending_user_response": True,
-            "missing_info": missing_info,
-            "messages": state["messages"] + [
-                {"role": "assistant", "content": f"I need some more information:\n\n" + 
-                 "\n".join([f"{i+1}. {q}" for i, q in enumerate(fallback_questions)])}
-            ]
-        }
+        print(f"General error generating questions: {e}")
+        return _get_question_generation_fallback(state, missing_info)
 
 
 def response_processing_node(state: ConversationState, user_response: str) -> Dict[str, Any]:
@@ -139,7 +184,6 @@ def response_processing_node(state: ConversationState, user_response: str) -> Di
     
     try:
         response = llm.invoke([HumanMessage(content=prompt)])
-        print(f"GPT Response: {response.content}")
         
         # Clean the response content to ensure valid JSON
         content = response.content.strip()
@@ -161,15 +205,20 @@ def response_processing_node(state: ConversationState, user_response: str) -> Di
             if value is not None:
                 company_info[key] = value
         
-        # Update job roles
+        # Update only the current role
         job_roles = list(state["job_roles"])
+        current_index = state.get("current_role_index", 0)
+        
+        # Apply updates to current role only
         for role_update in updates_data.get("job_role_updates", []):
-            index = role_update.get("index", 0)
-            if 0 <= index < len(job_roles):
-                role_updates = role_update.get("updates", {})
+            update_index = role_update.get("index", 0)
+            role_updates = role_update.get("updates", {})
+            
+            # Apply updates to the specified role index if it's valid and has meaningful data
+            if update_index < len(job_roles) and any(v is not None for v in role_updates.values()):
                 for key, value in role_updates.items():
                     if value is not None:
-                        job_roles[index][key] = value
+                        job_roles[update_index][key] = value
         
         # Add any additional roles
         for new_role_data in updates_data.get("additional_roles", []):
@@ -178,52 +227,47 @@ def response_processing_node(state: ConversationState, user_response: str) -> Di
                 seniority_level=new_role_data.get("seniority_level"),
                 department=new_role_data.get("department"),
                 specific_skills=new_role_data.get("specific_skills"),
+                budget_range=new_role_data.get("budget_range"),
+                timeline=new_role_data.get("timeline"),
                 generated_content=None
             )
             job_roles.append(new_role)
         
-        # Update state
+        # Update state - PRESERVE all existing state values
         result = {
             "company_info": company_info,
             "job_roles": job_roles,
             "pending_user_response": False,
             "current_questions": None,
+            # CRITICAL: Preserve existing state values
+            "current_role_index": state.get("current_role_index", 0),
+            "role_completion_status": state.get("role_completion_status", []),
             "messages": state["messages"] + [
                 {"role": "user", "content": user_response},
-                {"role": "assistant", "content": "Thanks for the information! Let me check if I need anything else."}
+                {"role": "assistant", "content": "Thanks for the information!"}
             ]
         }
         
-        # Check if we have enough information
-        temp_state = dict(state)
-        temp_state.update(result)
-        
-        if is_information_sufficient(temp_state):
-            result["stage"] = WorkflowStage.GENERATING_CONTENT
-            result["ready_for_generation"] = True
-        else:
-            result["stage"] = WorkflowStage.ASKING_QUESTIONS
+        # Always move to role completion check after processing response
+        result["stage"] = WorkflowStage.ASKING_QUESTIONS
         
         return result
         
     except Exception as e:
         print(f"Error processing response: {e}")
-        # If JSON parsing fails, acknowledge the response but mark as needing more info
+        # If JSON parsing fails, acknowledge the response but continue with role completion check
         result = {
             "pending_user_response": False,
             "current_questions": None,
+            # CRITICAL: Preserve existing state values even in fallback
+            "current_role_index": state.get("current_role_index", 0),
+            "role_completion_status": state.get("role_completion_status", []),
             "messages": state["messages"] + [
                 {"role": "user", "content": user_response},
-                {"role": "assistant", "content": "Thanks for that information! Let me see if I need any additional details to create the best hiring materials for you."}
-            ]
+                {"role": "assistant", "content": "Thanks for that information!"}
+            ],
+            "stage": WorkflowStage.ASKING_QUESTIONS
         }
-        
-        # Check if we have enough information with current state
-        if is_information_sufficient(state):
-            result["stage"] = WorkflowStage.GENERATING_CONTENT
-            result["ready_for_generation"] = True
-        else:
-            result["stage"] = WorkflowStage.ASKING_QUESTIONS
         
         return result
 
@@ -306,3 +350,141 @@ def should_ask_questions(state: ConversationState) -> str:
 def needs_user_response(state: ConversationState) -> bool:
     """Check if we're waiting for user response."""
     return state.get("pending_user_response", False)
+
+
+# Helper functions for fallback handling
+def _get_initial_analysis_fallback(state: ConversationState) -> Dict[str, Any]:
+    """Fallback response for initial analysis failures."""
+    # Since we can't parse the GPT response, we'll create a generic job role
+    # to allow the process to continue
+    fallback_role = JobRole(
+        title="Position",  # Generic title that will be refined later
+        seniority_level=None,
+        department=None,
+        specific_skills=None,
+        budget_range=None,
+        timeline=None,
+        generated_content=None
+    )
+    
+    return {
+        "stage": WorkflowStage.ASKING_QUESTIONS,
+        "job_roles": [fallback_role],  # Provide at least one role so workflow can continue
+        "messages": state["messages"] + [
+            {"role": "user", "content": state["original_request"]},
+            {"role": "assistant", "content": "I'll help you with your hiring needs. Let me ask a few questions to get started."}
+        ]
+    }
+
+
+def role_focus_node(state: ConversationState) -> Dict[str, Any]:
+    """Set up focus on the current role and introduce it to the user."""
+    current_role = get_current_role(state)
+    current_index = state.get("current_role_index", 0)
+    job_roles = state.get("job_roles", [])
+    
+    if not current_role or current_index >= len(job_roles):
+        # All roles complete, move to content generation
+        return {
+            "stage": WorkflowStage.GENERATING_CONTENT,
+            "ready_for_generation": True
+        }
+    
+    role_title = current_role["title"]
+    total_roles = len(state["job_roles"])
+    completion_status = state.get("role_completion_status", [])
+    
+    if current_index == 0:
+        # First role introduction
+        intro_message = f"Great! I found {total_roles} role(s) to help you with. Let's start with the **{role_title}** position and gather the details I need to create comprehensive hiring materials."
+    else:
+        # Subsequent role introduction
+        intro_message = f"Perfect! I have enough information about the previous role. Now let's focus on the **{role_title}** position."
+    
+    return {
+        "stage": WorkflowStage.ASKING_QUESTIONS,
+        "messages": state["messages"] + [
+            {"role": "assistant", "content": intro_message}
+        ]
+    }
+
+
+def role_completion_check_node(state: ConversationState) -> Dict[str, Any]:
+    """Check if current role is complete and determine next steps."""
+    current_role = get_current_role(state)
+    current_index = state.get("current_role_index", 0)
+    job_roles = state.get("job_roles", [])
+    completion_status = list(state.get("role_completion_status", []))
+    
+    if not current_role or current_index >= len(job_roles):
+        # No current role or index out of bounds, move to content generation
+        return {
+            "stage": WorkflowStage.GENERATING_CONTENT,
+            "ready_for_generation": True
+        }
+    
+    role_complete = is_role_information_sufficient(current_role)
+    
+    # Ensure completion status list is the right length
+    while len(completion_status) < len(job_roles):
+        completion_status.append(False)
+    
+    if role_complete:
+        # Mark current role as complete
+        completion_status[current_index] = True
+        role_title = current_role["title"]
+        
+        # Check if there are more roles to process
+        next_index = current_index + 1
+        
+        if next_index < len(job_roles):
+            # Move to next role - increment index and stay in ASKING_QUESTIONS stage
+            next_role_title = job_roles[next_index]["title"]
+            result = {
+                "current_role_index": next_index,
+                "role_completion_status": completion_status,
+                "stage": WorkflowStage.ASKING_QUESTIONS,
+                "messages": state["messages"] + [
+                    {"role": "assistant", "content": f"Excellent! I have enough information about the **{role_title}** role."}
+                ]
+            }
+            return result
+        else:
+            # All roles complete, move to content generation
+            result = {
+                "role_completion_status": completion_status,
+                "stage": WorkflowStage.GENERATING_CONTENT,
+                "ready_for_generation": True
+            }
+            return result
+    else:
+        # Role not complete, continue asking questions for current role
+        completion_status[current_index] = False
+        result = {
+            "role_completion_status": completion_status,
+            "stage": WorkflowStage.ASKING_QUESTIONS
+        }
+        return result
+
+
+def _get_question_generation_fallback(state: ConversationState, missing_info: List[str]) -> Dict[str, Any]:
+    """Fallback response for question generation failures."""
+    current_role = get_current_role(state)
+    role_title = current_role["title"] if current_role else "this position"
+    
+    # Use basic fallback questions when JSON parsing fails
+    fallback_questions = [
+        f"What's your budget range for the {role_title}?",
+        f"How quickly do you need to fill the {role_title} role?",
+        f"What are the key skills required for the {role_title}?"
+    ]
+    
+    return {
+        "current_questions": fallback_questions,
+        "pending_user_response": True,
+        "missing_info": missing_info,
+        "messages": state["messages"] + [
+            {"role": "assistant", "content": f"I need some more information about the {role_title} role:\n\n" + 
+             "\n".join([f"{i+1}. {q}" for i, q in enumerate(fallback_questions)])}
+        ]
+    }

@@ -35,6 +35,9 @@ def generate_hiring_checklist(role_info: Dict[str, Any], company_info: Dict[str,
     # Format the prompt with available information
     prompt = HIRING_CHECKLIST_PROMPT.format(
         company_name=company_info.get("name", "Our Company"),
+        company_description=company_info.get("description", "An innovative company making a difference in our industry"),
+        company_values=company_info.get("values", "Innovation, collaboration, and excellence"),
+        company_mission=company_info.get("mission", "Building solutions that matter"),
         company_size=company_info.get("size", "Early-stage startup"),
         company_stage=company_info.get("stage", "Growing startup"),
         role_title=role_info.get("title", ""),
@@ -91,29 +94,36 @@ def generate_hiring_checklist(role_info: Dict[str, Any], company_info: Dict[str,
 """
 
 
-def save_hiring_checklist(content: str, role_title: str, output_dir: str = "output") -> str:
+def save_hiring_checklist(content: str, role_title: str, output_dir: str = "output", session_id: str = None) -> str:
     """
     Save hiring checklist to a markdown file.
     
     Args:
         content: Checklist content
         role_title: Title of the role for filename
-        output_dir: Directory to save the file
+        output_dir: Base directory to save the file
+        session_id: Session ID for creating session-specific subdirectory
     
     Returns:
         Path to the saved file
     """
     import os
     
+    # Create session-specific subdirectory if session_id provided
+    if session_id:
+        session_output_dir = os.path.join(output_dir, session_id)
+    else:
+        session_output_dir = output_dir
+    
     # Ensure output directory exists
-    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(session_output_dir, exist_ok=True)
     
     # Clean role title for filename
     safe_title = "".join(c for c in role_title if c.isalnum() or c in (' ', '-', '_')).rstrip()
     safe_title = safe_title.replace(' ', '_').lower()
     
     filename = f"hiring_checklist_{safe_title}.md"
-    filepath = os.path.join(output_dir, filename)
+    filepath = os.path.join(session_output_dir, filename)
     
     try:
         with open(filepath, 'w', encoding='utf-8') as f:

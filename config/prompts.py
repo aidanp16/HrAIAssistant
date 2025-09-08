@@ -6,10 +6,12 @@ You are an HR Assistant helping startups plan their hiring process. A user has m
 
 "{original_request}"
 
+IMPORTANT: The company profile (name, size, stage, industry, location, remote policy, description, values, mission) is already stored and complete. You don't need to ask about basic company information.
+
 Your task is to analyze this request and extract:
 1. The specific job roles they want to hire for
-2. Any information already provided about the company or roles
-3. Whether you need more information to create comprehensive hiring materials
+2. Any role-specific information already provided (skills, timeline, budget)
+3. Whether you need more role-specific information to create comprehensive hiring materials
 
 For each job role identified, extract:
 - Job title
@@ -17,7 +19,8 @@ For each job role identified, extract:
 - Department/area
 - Any specific skills mentioned
 
-Return your analysis in this JSON format:
+IMPORTANT: Return ONLY valid JSON in the exact format below. No additional text, no markdown formatting, no code blocks.
+
 {{
     "job_roles": [
         {{
@@ -32,47 +35,80 @@ Return your analysis in this JSON format:
         "size": "company size or null",
         "stage": "funding stage or null",
         "industry": "industry or null",
-        "location": "location or null",
-        "budget_range": "budget info or null",
-        "timeline": "timeline info or null"
+        "location": "location or null"
     }},
-    "needs_more_info": true/false,
-    "confidence": "high/medium/low"
+    "needs_more_info": true,
+    "confidence": "high"
 }}
 
-Be thorough in extracting any details provided, even if implicit.
+EXAMPLE for "I need to hire a founding engineer and a GenAI intern":
+{{
+    "job_roles": [
+        {{
+            "title": "Founding Engineer",
+            "seniority_level": "founding",
+            "department": "engineering", 
+            "specific_skills": null
+        }},
+        {{
+            "title": "GenAI Intern",
+            "seniority_level": "intern",
+            "department": "engineering", 
+            "specific_skills": ["AI", "Machine Learning", "Python"]
+        }}
+    ],
+    "company_info_provided": {{
+        "name": null,
+        "size": null,
+        "stage": null,
+        "industry": null,
+        "location": null
+    }},
+    "needs_more_info": true,
+    "confidence": "high"
+}}
 """
 
 
 QUESTION_GENERATION_PROMPT = """
-You are an HR Assistant helping a startup plan their hiring process. Based on the current conversation state, generate 3-5 targeted questions to gather the missing information needed to create comprehensive hiring materials.
+You are an HR Assistant helping a startup plan their hiring process. Based on the current conversation state, generate 3 targeted questions to gather the missing information needed to create comprehensive hiring materials.
 
 Current context:
 - Original request: "{original_request}"
-- Job roles to hire: {job_roles}
+- Current role focus: {current_role}
 - Company info we have: {company_info}
-- Missing information: {missing_info}
+- Missing information for this role: {missing_info}
+
+IMPORTANT: The company profile (name, size, stage, industry, location, remote policy, description, values, mission) is already stored and complete. DO NOT ask questions about basic company information.
+
+IMPORTANT: Focus ONLY on the current role: {current_role_title}. Do not ask about other roles.
 
 Generate questions that are:
-1. Specific and actionable
+1. Specific to this role's requirements (budget, timeline, skills)
 2. Relevant to startup hiring
-3. Help determine budget, timeline, and requirements
+3. Help determine role-specific details for {current_role_title}
 4. Natural and conversational
-5. When multiple roles are involved, ask about them specifically
+5. Limited to exactly 3 questions
 
-IMPORTANT: If there are multiple job roles, ask about budget/requirements for EACH role separately.
+Focus ONLY on missing information for {current_role_title}:
+- Budget range for this specific role
+- Timeline for filling this position
+- Specific skill requirements
+- Seniority level preferences
 
-Focus on the most important missing information first. Return only the questions as a JSON list:
+IMPORTANT: Return ONLY a valid JSON array of exactly 3 questions. No additional text, no markdown formatting, no code blocks.
 
 ["Question 1?", "Question 2?", "Question 3?"]
 
-Examples of good questions:
-- "What's your company size and current funding stage?"
-- "What's your budget range for the founding engineer role specifically?"
-- "What's your budget range for the GenAI intern position?"
-- "How quickly do you need to fill these positions?"
-- "What are the must-have technical skills for the founding engineer?"
-- "What level of AI/ML experience do you need for the intern role?"
+EXAMPLE OUTPUT for a founding engineer role:
+["What's your budget range for the founding engineer position?", "How quickly do you need to fill the founding engineer role?", "What are the must-have technical skills for the founding engineer?"]
+
+Examples of good role-specific questions:
+- "What's your budget range for the [role title] position?"
+- "How quickly do you need to fill the [role title] role?"
+- "What are the must-have technical skills for the [role title]?"
+- "What level of experience do you need for the [role title]?"
+- "What's the ideal timeline for onboarding the [role title]?"
 """
 
 
@@ -92,36 +128,64 @@ Analyze the user's response and extract ANY new information they provided. Retur
         "stage": null,
         "industry": null,
         "location": null,
-        "remote_policy": null,
-        "budget_range": null,
-        "timeline": null
+        "remote_policy": null
     }},
-    "job_role_updates": [],
+    "job_role_updates": [
+        {{
+            "index": 0,
+            "updates": {{
+                "budget_range": null,
+                "timeline": null,
+                "specific_skills": null,
+                "seniority_level": null
+            }}
+        }}
+    ],
     "additional_roles": []
 }}
 
 IMPORTANT RULES:
 1. Replace null with actual values ONLY if the user provided that information
 2. Keep null for any field the user didn't mention
-3. For budget_range, capture salary ranges like "120k-150k" or "$80k-120k"
-4. For timeline, capture urgency like "6-8 weeks" or "ASAP" or "2 months"
-5. For size, use formats like "100 employees" or "50-person team"
-6. For stage, capture funding like "Series B" or "Seed stage"
-7. Return ONLY the JSON, no other text
-8. Do not include comments in the JSON
+3. Budget and timeline are now ROLE-SPECIFIC, not company-wide
+4. If user mentions budget/timeline for specific roles, put in job_role_updates with correct index
+5. If user mentions budget/timeline without specifying roles, apply to all roles (create updates for each index)
+6. For budget_range, capture salary ranges like "120k-150k" or "$80k-120k"
+7. For timeline, capture urgency like "6-8 weeks" or "ASAP" or "2 months"
+8. For size, use formats like "100 employees" or "50-person team"
+9. For stage, capture funding like "Series B" or "Seed stage"
+10. Return ONLY the JSON, no other text
+11. Do not include comments in the JSON
 
-Example response for "We're a 100 employee Series B company, budget is 120k-150k, need to fill in 6-8 weeks":
+Example response for "We're a 100 employee Series B company, budget is 120k-150k for founding engineer, 70k-90k for intern, need to fill both in 6-8 weeks":
 {{
     "company_info_updates": {{
         "size": "100 employees",
         "stage": "Series B",
         "industry": null,
         "location": null,
-        "remote_policy": null,
-        "budget_range": "$120k-150k",
-        "timeline": "6-8 weeks"
+        "remote_policy": null
     }},
-    "job_role_updates": [],
+    "job_role_updates": [
+        {{
+            "index": 0,
+            "updates": {{
+                "budget_range": "$120k-150k",
+                "timeline": "6-8 weeks",
+                "specific_skills": null,
+                "seniority_level": null
+            }}
+        }},
+        {{
+            "index": 1,
+            "updates": {{
+                "budget_range": "$70k-90k",
+                "timeline": "6-8 weeks",
+                "specific_skills": null,
+                "seniority_level": null
+            }}
+        }}
+    ],
     "additional_roles": []
 }}
 """
@@ -132,6 +196,9 @@ Create a comprehensive job description for a startup position.
 
 Company Information:
 - Name: {company_name}
+- Description: {company_description}
+- Values: {company_values}
+- Mission: {company_mission}
 - Size: {company_size} 
 - Stage: {company_stage}
 - Industry: {industry}
@@ -153,6 +220,8 @@ Create a compelling job description that includes:
 5. What we offer (equity, benefits, growth)
 6. Company culture and mission
 
+IMPORTANT: Naturally incorporate the company's description, values, and mission throughout the job description to help candidates understand the company culture, purpose, and what makes this opportunity unique. Use these elements to make the role more compelling and authentic.
+
 Make it startup-appropriate - emphasize growth, impact, equity, and learning opportunities.
 Format as clean markdown with proper headings.
 """
@@ -162,6 +231,9 @@ HIRING_CHECKLIST_PROMPT = """
 Create a comprehensive hiring checklist for a startup hiring this role.
 
 Company: {company_name} ({company_size}, {company_stage})
+Company Description: {company_description}
+Company Values: {company_values}
+Company Mission: {company_mission}
 Role: {role_title} ({seniority_level})
 Timeline: {timeline}
 Budget: {budget_range}
@@ -199,6 +271,9 @@ HIRING_TIMELINE_PROMPT = """
 Create a realistic hiring timeline for this startup role.
 
 Company: {company_name} ({company_size}, {company_stage})  
+Company Description: {company_description}
+Company Values: {company_values}
+Company Mission: {company_mission}
 Role: {role_title} ({seniority_level})
 Urgency: {timeline}
 Market: {industry}
@@ -225,6 +300,9 @@ SALARY_RECOMMENDATION_PROMPT = """
 Provide salary and compensation recommendations for this startup role.
 
 Company: {company_name}
+- Description: {company_description}
+- Values: {company_values}
+- Mission: {company_mission}
 - Size: {company_size}
 - Stage: {company_stage} 
 - Location: {location}
@@ -265,6 +343,9 @@ INTERVIEW_QUESTIONS_PROMPT = """
 Create comprehensive interview questions for this startup role.
 
 Company: {company_name} ({company_size}, {company_stage})
+Company Description: {company_description}
+Company Values: {company_values}
+Company Mission: {company_mission}
 Role: {role_title} ({seniority_level})  
 Department: {department}
 Required Skills: {required_skills}

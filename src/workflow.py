@@ -1,15 +1,19 @@
 """Main LangGraph workflow for HR Assistant."""
 
 import os
+import sqlite3
 from typing import Dict, Any, List
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 
 from .state import ConversationState, WorkflowStage, create_initial_state
 from .nodes import (
     initial_analysis_node,
+    role_focus_node,
     question_generation_node, 
     response_processing_node,
+    role_completion_check_node,
     content_generation_coordinator_node,
     completion_node,
     should_ask_questions,
@@ -27,8 +31,26 @@ class HRAssistantWorkflow:
     
     def __init__(self):
         self.graph = None
-        self.checkpointer = MemorySaver()
+        # Initialize persistent checkpointer with automatic database creation
+        try:
+            # Create SQLite connection and initialize checkpointer
+            self.conn = sqlite3.connect("checkpoints.db", check_same_thread=False)
+            self.checkpointer = SqliteSaver(self.conn)
+            # Setup the database schema
+            self.checkpointer.setup()
+        except Exception as e:
+            print(f"Warning: Could not create persistent storage: {e}")
+            print("This shouldn't happen, but falling back to memory-only storage...")
+            # Import fallback
+            from langgraph.checkpoint.memory import MemorySaver
+            self.checkpointer = MemorySaver()
+            self.conn = None
         self._build_graph()
+    
+    def cleanup(self):
+        """Clean up resources, especially database connections."""
+        if hasattr(self, 'conn') and self.conn:
+            self.conn.close()
     
     def _build_graph(self):
         """Build the LangGraph workflow."""
@@ -38,7 +60,9 @@ class HRAssistantWorkflow:
         
         # Add nodes
         workflow.add_node("initial_analysis", self._initial_analysis_wrapper)
+        workflow.add_node("role_focus", self._role_focus_wrapper)
         workflow.add_node("question_generation", self._question_generation_wrapper)
+        workflow.add_node("role_completion_check", self._role_completion_check_wrapper)
         workflow.add_node("content_generation_coordinator", self._content_coordinator_wrapper)
         workflow.add_node("content_generation", self._content_generation_wrapper)
         workflow.add_node("completion", self._completion_wrapper)
@@ -51,16 +75,27 @@ class HRAssistantWorkflow:
             "initial_analysis",
             self._route_after_analysis,
             {
-                "question_generation": "question_generation",
+                "role_focus": "role_focus",
                 "content_generation_coordinator": "content_generation_coordinator"
             }
         )
+        
+        workflow.add_edge("role_focus", "question_generation")
         
         workflow.add_conditional_edges(
             "question_generation", 
             self._route_after_questions,
             {
                 "wait_for_response": END,
+                "role_completion_check": "role_completion_check"
+            }
+        )
+        
+        workflow.add_conditional_edges(
+            "role_completion_check",
+            self._route_after_role_check,
+            {
+                "role_focus": "role_focus",
                 "content_generation_coordinator": "content_generation_coordinator"
             }
         )
@@ -76,9 +111,17 @@ class HRAssistantWorkflow:
         """Wrapper for initial analysis node."""
         return initial_analysis_node(state)
     
+    def _role_focus_wrapper(self, state: ConversationState) -> Dict[str, Any]:
+        """Wrapper for role focus node."""
+        return role_focus_node(state)
+    
     def _question_generation_wrapper(self, state: ConversationState) -> Dict[str, Any]:
         """Wrapper for question generation node.""" 
         return question_generation_node(state)
+    
+    def _role_completion_check_wrapper(self, state: ConversationState) -> Dict[str, Any]:
+        """Wrapper for role completion check node."""
+        return role_completion_check_node(state)
     
     def _response_processing_wrapper(self, state: ConversationState) -> Dict[str, Any]:
         """Wrapper for response processing node."""
@@ -90,47 +133,70 @@ class HRAssistantWorkflow:
         """Wrapper for content generation coordinator."""
         return content_generation_coordinator_node(state)
     
+    def _generate_single_document(self, tool_func, save_func, doc_type, role, company_info, session_id):
+        """Generate a single document for a role."""
+        try:
+            role_title = role["title"]
+            content = tool_func.invoke({"role_info": dict(role), "company_info": dict(company_info)})
+            # Pass session_id to save function for session-specific storage
+            file_path = save_func(content, role_title, session_id=session_id)
+            if file_path:
+                file_key = f"{doc_type}_{role_title.lower().replace(' ', '_')}"
+                return (file_key, file_path)
+            return None
+        except Exception as e:
+            print(f"Error generating {doc_type} for {role['title']}: {e}")
+            return None
+    
     def _content_generation_wrapper(self, state: ConversationState) -> Dict[str, Any]:
-        """Generate all content for all job roles."""
+        """Generate all content for all job roles in parallel."""
         generated_files = {}
         
+        # Load the complete company profile to ensure we have all available data
+        try:
+            from .company_profile import get_company_info_dict
+        except ImportError:
+            from src.company_profile import get_company_info_dict
+        full_company_profile = get_company_info_dict()
+        
+        # Define all document generation tasks
+        generation_tasks = []
+        
         for role in state["job_roles"]:
-            role_title = role["title"]
-            company_info = state["company_info"]
+            # Use full company profile instead of just state company_info
+            # This ensures we get description, values, mission, etc.
+            company_info = dict(full_company_profile)
             
-            try:
-                # Generate job description
-                job_desc = generate_job_description(dict(role), dict(company_info))
-                job_desc_path = save_job_description(job_desc, role_title)
-                if job_desc_path:
-                    generated_files[f"job_description_{role_title.lower().replace(' ', '_')}"] = job_desc_path
-                
-                # Generate hiring checklist
-                checklist = generate_hiring_checklist(dict(role), dict(company_info))
-                checklist_path = save_hiring_checklist(checklist, role_title)
-                if checklist_path:
-                    generated_files[f"hiring_checklist_{role_title.lower().replace(' ', '_')}"] = checklist_path
-                
-                # Generate hiring timeline
-                timeline = generate_hiring_timeline(dict(role), dict(company_info))
-                timeline_path = save_hiring_timeline(timeline, role_title)
-                if timeline_path:
-                    generated_files[f"hiring_timeline_{role_title.lower().replace(' ', '_')}"] = timeline_path
-                
-                # Generate salary recommendation
-                salary_rec = generate_salary_recommendation(dict(role), dict(company_info))
-                salary_path = save_salary_recommendation(salary_rec, role_title)
-                if salary_path:
-                    generated_files[f"salary_recommendation_{role_title.lower().replace(' ', '_')}"] = salary_path
-                
-                # Generate interview questions
-                questions = generate_interview_questions(dict(role), dict(company_info))
-                questions_path = save_interview_questions(questions, role_title)
-                if questions_path:
-                    generated_files[f"interview_questions_{role_title.lower().replace(' ', '_')}"] = questions_path
-                    
-            except Exception as e:
-                print(f"Error generating content for {role_title}: {e}")
+            # Add role-specific budget and timeline to company info
+            company_info["budget_range"] = role.get("budget_range", "Competitive")
+            company_info["timeline"] = role.get("timeline", "Standard timeline")
+            
+            # Add all document types for this role
+            generation_tasks.extend([
+                (generate_job_description, save_job_description, "job_description", role, company_info),
+                (generate_hiring_checklist, save_hiring_checklist, "hiring_checklist", role, company_info),
+                (generate_hiring_timeline, save_hiring_timeline, "hiring_timeline", role, company_info),
+                (generate_salary_recommendation, save_salary_recommendation, "salary_recommendation", role, company_info),
+                (generate_interview_questions, save_interview_questions, "interview_questions", role, company_info)
+            ])
+        
+        # Get session_id from state
+        session_id = state["session_id"]
+        
+        # Execute all tasks in parallel
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            # Submit all tasks with session_id
+            future_to_task = {
+                executor.submit(self._generate_single_document, *task, session_id): task 
+                for task in generation_tasks
+            }
+            
+            # Collect results as they complete
+            for future in as_completed(future_to_task):
+                result = future.result()
+                if result:
+                    file_key, file_path = result
+                    generated_files[file_key] = file_path
         
         return {
             "generated_files": generated_files,
@@ -146,14 +212,21 @@ class HRAssistantWorkflow:
         if state["stage"] == WorkflowStage.GENERATING_CONTENT:
             return "content_generation_coordinator"
         else:
-            return "question_generation"
+            return "role_focus"
     
     def _route_after_questions(self, state: ConversationState) -> str:
         """Route after question generation."""
         if state.get("pending_user_response", False):
             return "wait_for_response"
         else:
+            return "role_completion_check"
+    
+    def _route_after_role_check(self, state: ConversationState) -> str:
+        """Route after role completion check."""
+        if state["stage"] == WorkflowStage.GENERATING_CONTENT:
             return "content_generation_coordinator"
+        else:
+            return "role_focus"
     
     def _route_after_response(self, state: ConversationState) -> str:
         """Route after processing user response."""
@@ -180,29 +253,85 @@ class HRAssistantWorkflow:
         current_state = self.graph.get_state(config)
         
         if current_state and current_state.values:
-            # Process the response directly
-            from .nodes import response_processing_node
-            
-            # Add user response to current state
-            updated_state = dict(current_state.values)
-            updated_state["user_response"] = user_response
-            
-            # Process the response
-            response_result = response_processing_node(updated_state, user_response)
-            
-            # Update state with processed response
-            for key, value in response_result.items():
-                updated_state[key] = value
-            
-            # Continue the workflow if ready for content generation
-            if updated_state.get("ready_for_generation", False):
-                result = self.graph.invoke(updated_state, config)
-            else:
-                # Continue with question generation
-                from .nodes import question_generation_node
-                question_result = question_generation_node(updated_state)
-                for key, value in question_result.items():
+            try:
+                # Process the response directly
+                from .nodes import response_processing_node
+                
+                # Add user response to current state
+                updated_state = dict(current_state.values)
+                updated_state["user_response"] = user_response
+                
+                # Process the response
+                response_result = response_processing_node(updated_state, user_response)
+                
+                # Update state with processed response
+                for key, value in response_result.items():
                     updated_state[key] = value
+                
+                # Process role completion check after user response
+                role_check_result = role_completion_check_node(updated_state)
+                for key, value in role_check_result.items():
+                    updated_state[key] = value
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                return updated_state if 'updated_state' in locals() else current_state.values
+            
+            # Continue workflow based on role check result
+            if updated_state.get("ready_for_generation", False):
+                # All roles complete, go to content generation
+                from .nodes import content_generation_coordinator_node
+                coordinator_result = content_generation_coordinator_node(updated_state)
+                for key, value in coordinator_result.items():
+                    updated_state[key] = value
+                
+                # Generate all content
+                content_result = self._content_generation_wrapper(updated_state)
+                for key, value in content_result.items():
+                    updated_state[key] = value
+                
+                # Mark as completed
+                completion_result = self._completion_wrapper(updated_state)
+                for key, value in completion_result.items():
+                    updated_state[key] = value
+                
+                result = updated_state
+            else:
+                # Need more info for current role or move to next role
+                # Check if we moved to a new role after role completion check
+                old_role_index = current_state.values.get("current_role_index", 0)
+                new_role_index = updated_state.get("current_role_index", 0)
+                moved_to_new_role = new_role_index > old_role_index
+                
+                # Only call role_focus_node if we actually moved to a new role
+                if moved_to_new_role:
+                    role_focus_result = role_focus_node(updated_state)
+                    for key, value in role_focus_result.items():
+                        updated_state[key] = value
+                
+                # Check if we're ready for content generation
+                if updated_state.get("ready_for_generation", False) or updated_state.get("stage") == WorkflowStage.GENERATING_CONTENT:
+                    # All roles complete, go to content generation
+                    from .nodes import content_generation_coordinator_node
+                    coordinator_result = content_generation_coordinator_node(updated_state)
+                    for key, value in coordinator_result.items():
+                        updated_state[key] = value
+                    
+                    # Generate all content
+                    content_result = self._content_generation_wrapper(updated_state)
+                    for key, value in content_result.items():
+                        updated_state[key] = value
+                    
+                    # Mark as completed
+                    completion_result = self._completion_wrapper(updated_state)
+                    for key, value in completion_result.items():
+                        updated_state[key] = value
+                elif updated_state.get("stage") == WorkflowStage.ASKING_QUESTIONS:
+                    # Still need more info for current role, generate questions
+                    question_result = question_generation_node(updated_state)
+                    for key, value in question_result.items():
+                        updated_state[key] = value
+                
                 result = updated_state
             
             return result
