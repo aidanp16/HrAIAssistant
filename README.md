@@ -83,15 +83,15 @@ graph TB
 
 ### Key Design Decisions
 
-1. **Role-by-Role Processing**: Instead of asking all questions at once, the system focuses on one role at a time to reduce cognitive load and improve response quality.
+1. **Role-by-Role Processing**: Instead of asking all questions at once, the system focuses on one role at a time to simplify question load and improve user experience.
 
 2. **Company Profile Persistence**: Company information is stored once and reused across sessions, eliminating redundant questions.
 
 3. **Parallel Content Generation**: All documents for all roles are generated concurrently using ThreadPoolExecutor, reducing wait time from ~30 seconds to ~8 seconds.
 
-4. **TypedDict State Management**: Using TypedDict provides type safety and clear state structure while maintaining flexibility.
+4. **TypedDict State Management**: Using TypedDict provides type safety and clear state structure.
 
-5. **Modular Tool Architecture**: Each content generator is a separate, testable module that can be easily modified or extended.
+5. **Modular Tool Architecture**: Each content generator is a separate module that can be easily modified or extended.
 
 6. **Session-Based File Organization**: Generated files are organized by session ID, allowing multiple concurrent users without file conflicts.
 
@@ -198,48 +198,22 @@ sequenceDiagram
 ## 🔄 What I Would Improve With More Time
 
 ### Technical Improvements
-1. **Database Integration**: Replace file-based storage with PostgreSQL for better scalability
-2. **Caching Layer**: Implement Redis for caching generated content and reducing API calls
-3. **Background Jobs**: Use Celery for async processing of large generation tasks
-4. **API Rate Limiting**: Implement proper rate limiting and retry logic
-5. **Testing Suite**: Add comprehensive unit and integration tests with pytest
-6. **Docker Support**: Containerize the application for easier deployment
+1. **Generated Content Reuse**: Reuse generated content for similar roles to reduce API calls and amount of total files generated
+2. **Docker Support**: Containerize the application for easier deployment
 
 ### Feature Enhancements
-1. **Multi-Language Support**: Generate content in multiple languages
+1. **Automated Job Postings**: Automate the process of posting job descriptions
 2. **Template Customization**: Allow users to customize document templates
-3. **ATS Integration**: Direct integration with popular Applicant Tracking Systems
-4. **Collaborative Editing**: Allow team members to review and edit generated content
-5. **Analytics Dashboard**: Track hiring pipeline metrics and success rates
-6. **Role Comparison**: Side-by-side comparison of similar roles
-7. **Budget Optimizer**: Suggest optimal compensation packages based on market data
+3. **Analytics Dashboard**: Track hiring pipeline metrics and success rates
+4. **Automated Email Sender**: Send automated emails to applicants or potential employees
 
 ### UX/UI Improvements
-1. **Real-time Progress Indicators**: Show generation progress for each document
-2. **Dark Mode**: Add theme switching capability
-3. **Mobile Responsiveness**: Optimize for mobile devices
-4. **Keyboard Shortcuts**: Add power-user features
-5. **Export Options**: Support for PDF, DOCX, and direct email sending
-6. **Undo/Redo**: Allow users to revert changes in the conversation
+1. **Dark Mode**: Add theme switching capability
+2. **Export Options**: Support for PDF, DOCX, and direct email sending
+3. **Undo/Redo**: Allow users to revert changes in the conversation
 
 ### AI/ML Enhancements
-1. **Fine-tuned Models**: Train custom models on successful hiring data
-2. **Embeddings Search**: Use vector search for similar role recommendations
-3. **Predictive Analytics**: Estimate time-to-hire and success probability
-4. **Bias Detection**: Implement checks for unconscious bias in generated content
-5. **Multi-Model Support**: Allow switching between GPT-4, Claude, and other LLMs
-
-## 🧪 Testing
-
-### Running Tests
-```bash
-# Test individual content generators
-python tools/job_description.py
-python tools/hiring_checklist.py
-python tools/hiring_timeline.py
-python tools/salary_recommendation.py
-python tools/interview_questions.py
-```
+1. **Multi-Model Support**: Allow switching between GPT-4, Claude, and other LLMs
 
 ### Test Scenarios
 1. **Single Role**: "I need a senior React developer"
@@ -255,23 +229,12 @@ python tools/interview_questions.py
 | Import Errors | Ensure virtual environment is activated |
 | Session Not Loading | Check `sessions/` directory permissions |
 | Timeout Errors | Check internet connection and API status |
-| Port Already in Use | Change port with `streamlit run src/app.py --server.port 8502` |
+| Port Already in Use | Change port with `streamlit run src/app.py --server.port 8502` or end running instance of app |
 
 ## 📈 Performance Metrics
 
 - **Response Time**: ~2-3 seconds per LLM call
 - **Document Generation**: ~8 seconds for all 5 documents (parallel)
-- **Session Load Time**: <100ms
-- **Memory Usage**: ~150MB baseline
-- **Concurrent Users**: Tested with up to 10 simultaneous sessions
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## 📄 License
-
-MIT License - see LICENSE file for details
 
 ## 🙏 Acknowledgments
 
@@ -279,6 +242,3 @@ MIT License - see LICENSE file for details
 - Powered by OpenAI's GPT-4o-mini
 - UI framework by Streamlit
 
----
-
-*Built with ❤️ for efficient startup hiring*
