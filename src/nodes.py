@@ -67,8 +67,8 @@ def initial_analysis_node(state: ConversationState) -> Dict[str, Any]:
                 seniority_level=role_data.get("seniority_level"),
                 department=role_data.get("department"),
                 specific_skills=role_data.get("specific_skills"),
-                budget_range=None,  # Will be filled in by response processing
-                timeline=None,      # Will be filled in by response processing
+                budget_range=role_data.get("budget_range"),  # Extract from initial analysis
+                timeline=role_data.get("timeline"),          # Extract from initial analysis
                 generated_content=None
             )
             job_roles.append(job_role)
@@ -80,8 +80,43 @@ def initial_analysis_node(state: ConversationState) -> Dict[str, Any]:
             if value is not None:
                 updated_company[key] = value
         
-        # Initialize role completion tracking
-        role_completion_status = [False] * len(job_roles)
+        # Handle case where no roles were detected
+        if len(job_roles) == 0:
+            # No roles detected - ask user to clarify
+            updates = {
+                "job_roles": [],
+                "company_info": updated_company,
+                "current_role_index": 0,
+                "role_completion_status": [],
+                "stage": WorkflowStage.ASKING_QUESTIONS,
+                "ready_for_generation": False,
+                "pending_user_response": True,
+                "current_questions": ["What specific role(s) do you need help hiring for?"],
+                "messages": state["messages"] + [
+                    {"role": "user", "content": state["original_request"]},
+                    {"role": "assistant", "content": "I didn't detect any specific job roles in your request. Could you please clarify which role(s) you need help hiring for?\n\nFor example:\n- 'Senior Frontend Developer'\n- 'Data Scientist and Marketing Manager'\n- 'Founding Engineer'"}
+                ]
+            }
+            return updates
+        
+        # Check if all roles have sufficient information for generation
+        all_roles_complete = True
+        role_completion_status = []
+        
+        for role in job_roles:
+            role_complete = is_role_information_sufficient(role)
+            role_completion_status.append(role_complete)
+            if not role_complete:
+                all_roles_complete = False
+        
+        # Determine the next stage based on role completeness
+        if all_roles_complete and len(job_roles) > 0:
+            # We have all information, but still need to go through coordinator for confirmation message
+            next_stage = WorkflowStage.ASKING_QUESTIONS
+            ready_for_generation = True
+        else:
+            next_stage = WorkflowStage.ASKING_QUESTIONS
+            ready_for_generation = False
         
         # Update conversation state
         updates = {
@@ -89,7 +124,8 @@ def initial_analysis_node(state: ConversationState) -> Dict[str, Any]:
             "company_info": updated_company,
             "current_role_index": 0,
             "role_completion_status": role_completion_status,
-            "stage": WorkflowStage.ASKING_QUESTIONS if analysis.get("needs_more_info", True) else WorkflowStage.GENERATING_CONTENT,
+            "stage": next_stage,
+            "ready_for_generation": ready_for_generation,
             "messages": state["messages"] + [
                 {"role": "user", "content": state["original_request"]}
             ]
@@ -110,6 +146,19 @@ def question_generation_node(state: ConversationState) -> Dict[str, Any]:
     """
     Generate contextual questions for the current role only.
     """
+    # Check if we have any roles at all
+    if len(state.get("job_roles", [])) == 0:
+        # No roles detected - this should have been handled in initial analysis
+        # If we get here, something went wrong, so ask for role clarification
+        return {
+            "pending_user_response": True,
+            "current_questions": ["What specific role(s) do you need help hiring for?"],
+            "stage": WorkflowStage.ASKING_QUESTIONS,
+            "messages": state["messages"] + [
+                {"role": "assistant", "content": "I need to know which specific role(s) you'd like help hiring for. Could you please tell me the job titles you need to fill?"}
+            ]
+        }
+    
     current_role = get_current_role(state)
     current_index = state.get("current_role_index", 0)
     
@@ -175,11 +224,119 @@ def response_processing_node(state: ConversationState, user_response: str) -> Di
     """
     Process user's response to questions and update the state.
     """
+    current_role_index = state.get("current_role_index", 0)
+    current_role = state["job_roles"][current_role_index] if current_role_index < len(state["job_roles"]) else None
+    
+    # Special case: If we have no roles and user is specifying roles for the first time
+    if len(state.get("job_roles", [])) == 0:
+        # Use initial analysis prompt to extract roles from user response
+        from config.prompts import INITIAL_ANALYSIS_PROMPT
+        prompt = INITIAL_ANALYSIS_PROMPT.format(
+            original_request=user_response  # Use the user's response as the new request
+        )
+        
+        try:
+            response = llm.invoke([HumanMessage(content=prompt)])
+            
+            # Clean the response content to ensure valid JSON
+            content = response.content.strip()
+            
+            # Try to extract JSON if there's extra text
+            if content.startswith('```json'):
+                content = content[7:]
+            if content.endswith('```'):
+                content = content[:-3]
+            if content.startswith('```'):
+                content = content[3:]
+            
+            content = content.strip()
+            
+            if not content:
+                raise ValueError("Empty response from GPT")
+                
+            analysis = json.loads(content)
+            
+            # Extract job roles from the analysis
+            job_roles = []
+            for role_data in analysis.get("job_roles", []):
+                job_role = JobRole(
+                    title=role_data["title"],
+                    seniority_level=role_data.get("seniority_level"),
+                    department=role_data.get("department"),
+                    specific_skills=role_data.get("specific_skills"),
+                    budget_range=role_data.get("budget_range"),
+                    timeline=role_data.get("timeline"),
+                    generated_content=None
+                )
+                job_roles.append(job_role)
+            
+            # If still no roles extracted, return asking for clarification again
+            if len(job_roles) == 0:
+                return {
+                    "pending_user_response": True,
+                    "current_questions": ["What specific role(s) do you need help hiring for?"],
+                    "stage": WorkflowStage.ASKING_QUESTIONS,
+                    "messages": state["messages"] + [
+                        {"role": "user", "content": user_response},
+                        {"role": "assistant", "content": "I'm still not sure which specific roles you need help with. Could you please be more specific? For example: 'I need a Senior Software Engineer' or 'I need to hire a Marketing Manager and a Data Scientist'"}
+                    ]
+                }
+            
+            # Successfully extracted roles, set up role completion tracking
+            role_completion_status = []
+            all_roles_complete = True
+            
+            for role in job_roles:
+                role_complete = is_role_information_sufficient(role)
+                role_completion_status.append(role_complete)
+                if not role_complete:
+                    all_roles_complete = False
+            
+            # Determine next stage based on role completeness
+            if all_roles_complete and len(job_roles) > 0:
+                ready_for_generation = True
+                stage = WorkflowStage.ASKING_QUESTIONS  # Will be picked up by coordinator
+            else:
+                ready_for_generation = False
+                stage = WorkflowStage.ASKING_QUESTIONS  # Will continue to role-specific questions
+            
+            result = {
+                "job_roles": job_roles,
+                "role_completion_status": role_completion_status,
+                "current_role_index": 0,
+                "pending_user_response": False,
+                "current_questions": None,
+                "ready_for_generation": ready_for_generation,
+                "stage": stage,
+                "messages": state["messages"] + [
+                    {"role": "user", "content": user_response},
+                    {"role": "assistant", "content": f"Great! I found {len(job_roles)} role(s) to help you with."}
+                ]
+            }
+            
+            return result
+            
+        except Exception as e:
+            print(f"Error extracting roles from user response: {e}")
+            # Fallback: ask for clarification again
+            return {
+                "pending_user_response": True,
+                "current_questions": ["What specific role(s) do you need help hiring for?"],
+                "stage": WorkflowStage.ASKING_QUESTIONS,
+                "messages": state["messages"] + [
+                    {"role": "user", "content": user_response},
+                    {"role": "assistant", "content": "I had trouble understanding which roles you need. Could you please specify the job titles more clearly? For example: 'Senior Developer', 'Product Manager', etc."}
+                ]
+            }
+    
+    # Normal case: we have existing roles, process updates to current role
     prompt = RESPONSE_PROCESSING_PROMPT.format(
         questions=json.dumps(state.get("current_questions", []), indent=2),
         user_response=user_response,
         company_info=json.dumps(dict(state["company_info"]), indent=2),
-        job_roles=json.dumps([dict(role) for role in state["job_roles"]], indent=2)
+        job_roles=json.dumps([dict(role) for role in state["job_roles"]], indent=2),
+        current_role_index=current_role_index,
+        current_role_title=current_role["title"] if current_role else "Unknown Role"
     )
     
     try:
@@ -205,20 +362,20 @@ def response_processing_node(state: ConversationState, user_response: str) -> Di
             if value is not None:
                 company_info[key] = value
         
-        # Update only the current role
+        # Update only the current role being processed
         job_roles = list(state["job_roles"])
         current_index = state.get("current_role_index", 0)
         
-        # Apply updates to current role only
+        # CRITICAL FIX: Only update the current role, ignore GPT's suggested indices
+        # The GPT doesn't have proper context about which role is currently being processed
         for role_update in updates_data.get("job_role_updates", []):
-            update_index = role_update.get("index", 0)
             role_updates = role_update.get("updates", {})
             
-            # Apply updates to the specified role index if it's valid and has meaningful data
-            if update_index < len(job_roles) and any(v is not None for v in role_updates.values()):
+            # Apply updates ONLY to the current role index, not what GPT suggests
+            if current_index < len(job_roles) and any(v is not None for v in role_updates.values()):
                 for key, value in role_updates.items():
                     if value is not None:
-                        job_roles[update_index][key] = value
+                        job_roles[current_index][key] = value
         
         # Add any additional roles
         for new_role_data in updates_data.get("additional_roles", []):
@@ -276,6 +433,18 @@ def content_generation_coordinator_node(state: ConversationState) -> Dict[str, A
     """
     Coordinate the generation of all content types for each job role.
     """
+    # Safety check: ensure we have roles to generate content for
+    if len(state.get("job_roles", [])) == 0:
+        return {
+            "stage": WorkflowStage.ASKING_QUESTIONS,
+            "ready_for_generation": False,
+            "pending_user_response": True,
+            "current_questions": ["What specific role(s) do you need help hiring for?"],
+            "messages": state["messages"] + [
+                {"role": "assistant", "content": "I need to know which specific role(s) you'd like help hiring for before I can generate hiring materials. Could you please tell me the job titles you need to fill?"}
+            ]
+        }
+    
     content_types = [
         "job_description",
         "hiring_checklist", 

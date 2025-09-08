@@ -13,11 +13,28 @@ Your task is to analyze this request and extract:
 2. Any role-specific information already provided (skills, timeline, budget)
 3. Whether you need more role-specific information to create comprehensive hiring materials
 
+CRITICAL: Always classify each role into the appropriate department using the guide below. Never leave department as null unless the role is truly ambiguous.
+
 For each job role identified, extract:
 - Job title
 - Seniority level (if mentioned)
 - Department/area
 - Any specific skills mentioned
+- Budget range (if mentioned)
+- Timeline (if mentioned)
+
+DEPARTMENT CLASSIFICATION GUIDE:
+- Engineering roles: "engineering" (Software Engineer, Developer, DevOps, QA, etc.)
+- Product roles: "product" (Product Manager, Product Owner, UX/UI Designer)
+- Marketing roles: "marketing" (Marketing Manager, Content Marketing, Growth, Social Media)
+- Sales roles: "sales" (Sales Manager, Account Executive, SDR, BDR)
+- Data roles: "data" (Data Scientist, Data Analyst, ML Engineer)
+- Design roles: "design" (Designer, Creative Director, Brand Designer)
+- Operations roles: "operations" (Operations Manager, HR, Finance, Admin)
+- Executive roles: "executive" (CEO, CTO, VP positions)
+- Customer roles: "customer" (Customer Success, Support, Account Management)
+
+IMPORTANT: Set "needs_more_info" to false ONLY if ALL roles have budget_range, timeline, and specific_skills provided. Otherwise, set it to true.
 
 IMPORTANT: Return ONLY valid JSON in the exact format below. No additional text, no markdown formatting, no code blocks.
 
@@ -27,7 +44,9 @@ IMPORTANT: Return ONLY valid JSON in the exact format below. No additional text,
             "title": "role title",
             "seniority_level": "senior/junior/founding/etc or null",
             "department": "engineering/marketing/etc or null", 
-            "specific_skills": ["skill1", "skill2"] or null
+            "specific_skills": ["skill1", "skill2"] or null,
+            "budget_range": "salary range like '120k-150k' or null",
+            "timeline": "timeline like '8 weeks' or '7-9 weeks' or null"
         }}
     ],
     "company_info_provided": {{
@@ -48,13 +67,79 @@ EXAMPLE for "I need to hire a founding engineer and a GenAI intern":
             "title": "Founding Engineer",
             "seniority_level": "founding",
             "department": "engineering", 
-            "specific_skills": null
+            "specific_skills": null,
+            "budget_range": null,
+            "timeline": null
         }},
         {{
             "title": "GenAI Intern",
             "seniority_level": "intern",
             "department": "engineering", 
-            "specific_skills": ["AI", "Machine Learning", "Python"]
+            "specific_skills": ["AI", "Machine Learning", "Python"],
+            "budget_range": null,
+            "timeline": null
+        }}
+    ],
+    "company_info_provided": {{
+        "name": null,
+        "size": null,
+        "stage": null,
+        "industry": null,
+        "location": null
+    }},
+    "needs_more_info": true,
+    "confidence": "high"
+}}
+
+EXAMPLE with budget and timeline for "Looking for a full-stack developer with React experience, budget 120-150k, fill in 8 weeks, and a data scientist with Python/ML, budget 80-100k, fill in 7-9 weeks":
+{{
+    "job_roles": [
+        {{
+            "title": "Full-Stack Developer",
+            "seniority_level": null,
+            "department": "engineering", 
+            "specific_skills": ["React"],
+            "budget_range": "120-150k",
+            "timeline": "8 weeks"
+        }},
+        {{
+            "title": "Data Scientist",
+            "seniority_level": null,
+            "department": "data", 
+            "specific_skills": ["Python", "ML"],
+            "budget_range": "80-100k",
+            "timeline": "7-9 weeks"
+        }}
+    ],
+    "company_info_provided": {{
+        "name": null,
+        "size": null,
+        "stage": null,
+        "industry": null,
+        "location": null
+    }},
+    "needs_more_info": false,
+    "confidence": "high"
+}}
+
+EXAMPLE with proper department classification for "I need a product manager and a marketing specialist":
+{{
+    "job_roles": [
+        {{
+            "title": "Product Manager",
+            "seniority_level": null,
+            "department": "product", 
+            "specific_skills": null,
+            "budget_range": null,
+            "timeline": null
+        }},
+        {{
+            "title": "Marketing Specialist",
+            "seniority_level": null,
+            "department": "marketing", 
+            "specific_skills": null,
+            "budget_range": null,
+            "timeline": null
         }}
     ],
     "company_info_provided": {{
@@ -119,6 +204,10 @@ Previous questions: {questions}
 User's response: "{user_response}"
 Current company info: {company_info}
 Current job roles: {job_roles}
+Current role being processed: Index {current_role_index} ({current_role_title})
+
+IMPORTANT: The user is currently answering questions about the {current_role_title} role (index {current_role_index}). 
+Focus your response processing on this role unless the user explicitly mentions other roles.
 
 Analyze the user's response and extract ANY new information they provided. Return ONLY valid JSON in this exact format:
 
@@ -148,8 +237,8 @@ IMPORTANT RULES:
 1. Replace null with actual values ONLY if the user provided that information
 2. Keep null for any field the user didn't mention
 3. Budget and timeline are now ROLE-SPECIFIC, not company-wide
-4. If user mentions budget/timeline for specific roles, put in job_role_updates with correct index
-5. If user mentions budget/timeline without specifying roles, apply to all roles (create updates for each index)
+4. CRITICAL: For the current role being processed, always use index {current_role_index} in job_role_updates
+5. Only create updates for other role indices if the user explicitly mentions other roles by name
 6. For budget_range, capture salary ranges like "120k-150k" or "$80k-120k"
 7. For timeline, capture urgency like "6-8 weeks" or "ASAP" or "2 months"
 8. For size, use formats like "100 employees" or "50-person team"
@@ -157,29 +246,21 @@ IMPORTANT RULES:
 10. Return ONLY the JSON, no other text
 11. Do not include comments in the JSON
 
-Example response for "We're a 100 employee Series B company, budget is 120k-150k for founding engineer, 70k-90k for intern, need to fill both in 6-8 weeks":
+Example response for user answering questions about current role (index {current_role_index}):
+If user says "Budget is 120k-150k, need to fill in 6-8 weeks":
 {{
     "company_info_updates": {{
-        "size": "100 employees",
-        "stage": "Series B",
+        "size": null,
+        "stage": null,
         "industry": null,
         "location": null,
         "remote_policy": null
     }},
     "job_role_updates": [
         {{
-            "index": 0,
+            "index": {current_role_index},
             "updates": {{
                 "budget_range": "$120k-150k",
-                "timeline": "6-8 weeks",
-                "specific_skills": null,
-                "seniority_level": null
-            }}
-        }},
-        {{
-            "index": 1,
-            "updates": {{
-                "budget_range": "$70k-90k",
                 "timeline": "6-8 weeks",
                 "specific_skills": null,
                 "seniority_level": null

@@ -514,22 +514,73 @@ class HRAssistantApp:
         """Start a new conversation with the user's request."""
         try:
             with st.spinner("Analyzing your hiring needs..."):
-                # Start workflow
-                result = hr_workflow.start_conversation(user_request, st.session_state.session_id)
+                # First, run just the initial analysis to see if we have complete information
+                from src.nodes import initial_analysis_node
+                from src.state import create_initial_state
                 
-                # Update session state
-                st.session_state.current_state = result
-                st.session_state.conversation_started = True
-                st.session_state.messages = result.get("messages", [])
+                initial_state = create_initial_state(user_request, st.session_state.session_id)
+                analysis_result = initial_analysis_node(initial_state)
                 
-                # Save session
-                session_manager.save_session(st.session_state.session_id, result)
+                # Update the state with analysis results
+                updated_state = dict(initial_state)
+                for key, value in analysis_result.items():
+                    updated_state[key] = value
                 
-                st.rerun()
+                # Check if we have complete information for all roles
+                if updated_state.get("ready_for_generation", False):
+                    # We have complete information! Show confirmation before generating
+                    from src.nodes import content_generation_coordinator_node
+                    
+                    # Run coordinator to get confirmation message
+                    coordinator_result = content_generation_coordinator_node(updated_state)
+                    for key, value in coordinator_result.items():
+                        updated_state[key] = value
+                    
+                    # Update session state to show the confirmation message
+                    st.session_state.current_state = updated_state
+                    st.session_state.conversation_started = True
+                    st.session_state.messages = updated_state.get("messages", [])
+                    session_manager.save_session(st.session_state.session_id, updated_state)
+                    
+                    st.rerun()
+                else:
+                    # Information is incomplete, run the normal workflow
+                    result = hr_workflow.start_conversation(user_request, st.session_state.session_id)
+                    
+                    # Update session state
+                    st.session_state.current_state = result
+                    st.session_state.conversation_started = True
+                    st.session_state.messages = result.get("messages", [])
+                    
+                    # Save session
+                    session_manager.save_session(st.session_state.session_id, result)
+                    
+                    st.rerun()
                 
         except Exception as e:
-            st.error(f"Error starting conversation: {e}")
-            st.write("Please check your OpenAI API key and try again.")
+            error_str = str(e).lower()
+            if "invalid api key" in error_str or "incorrect api key" in error_str or "authentication" in error_str:
+                st.error("🔑 Invalid OpenAI API Key!")
+                st.markdown("""
+                Your OpenAI API key appears to be invalid or has expired. Please:
+                
+                1. Check your `.env` file
+                2. Verify your API key is correct
+                3. Ensure you have sufficient credits
+                4. Restart the application
+                """)
+            elif "quota" in error_str or "rate limit" in error_str:
+                st.error("🚫 OpenAI API Quota Exceeded!")
+                st.markdown("""
+                You've exceeded your OpenAI API quota or rate limit. Please:
+                
+                1. Check your usage at [OpenAI Platform](https://platform.openai.com/usage)
+                2. Add credits to your account if needed
+                3. Wait a moment and try again
+                """)
+            else:
+                st.error(f"Error starting conversation: {e}")
+                st.write("Please check your OpenAI API key and internet connection.")
     
     def render_conversation_continuation(self):
         """Render conversation continuation interface."""
@@ -636,7 +687,28 @@ class HRAssistantApp:
                     return
                 
         except Exception as e:
-            st.error(f"Error processing response: {e}")
+            error_str = str(e).lower()
+            if "invalid api key" in error_str or "incorrect api key" in error_str or "authentication" in error_str:
+                st.error("🔑 Invalid OpenAI API Key!")
+                st.markdown("""
+                Your OpenAI API key appears to be invalid or has expired. Please:
+                
+                1. Check your `.env` file
+                2. Verify your API key is correct
+                3. Ensure you have sufficient credits
+                4. Restart the application
+                """)
+            elif "quota" in error_str or "rate limit" in error_str:
+                st.error("🚫 OpenAI API Quota Exceeded!")
+                st.markdown("""
+                You've exceeded your OpenAI API quota or rate limit. Please:
+                
+                1. Check your usage at [OpenAI Platform](https://platform.openai.com/usage)
+                2. Add credits to your account if needed
+                3. Wait a moment and try again
+                """)
+            else:
+                st.error(f"Error processing response: {e}")
     
     def render_status_interface(self):
         """Render current status and information."""
@@ -903,23 +975,133 @@ class HRAssistantApp:
             self.render_sidebar()
 
 
+def validate_openai_api_key(api_key: str) -> bool:
+    """Validate OpenAI API key by making a simple API call."""
+    try:
+        from langchain_openai import ChatOpenAI
+        from langchain.schema import HumanMessage
+        
+        # Create a simple test client
+        test_llm = ChatOpenAI(
+            model="gpt-4o-mini",
+            temperature=0,
+            openai_api_key=api_key,
+            max_tokens=5  # Very small to save costs
+        )
+        
+        # Make a minimal test call
+        response = test_llm.invoke([HumanMessage(content="Hi")])
+        return True
+        
+    except Exception as e:
+        error_str = str(e).lower()
+        if "invalid api key" in error_str or "incorrect api key" in error_str or "authentication" in error_str:
+            return False
+        elif "quota" in error_str or "rate limit" in error_str:
+            # API key is valid but has quota/rate issues - still valid key
+            return True
+        else:
+            # Other errors (network, etc.) - assume key might be valid
+            return True
+
+def render_api_key_setup():
+    """Render user-friendly API key setup interface."""
+    # Header
+    st.title("🤖 HR Assistant - Setup Required")
+    st.markdown("---")
+    
+    # API Key setup section
+    st.subheader("🔑 OpenAI API Key Setup")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        st.markdown("""
+        To use HR Assistant, you need a valid OpenAI API key. Here's how to set it up:
+        
+        ### Option 1: Environment File (Recommended)
+        1. Create a `.env` file in your project root directory
+        2. Add your API key: `OPENAI_API_KEY=your_key_here`
+        3. Restart the application
+        
+        ### Option 2: Environment Variable
+        Set the `OPENAI_API_KEY` environment variable on your system
+        
+        ### Get an API Key
+        1. Go to [OpenAI's website](https://platform.openai.com/api-keys)
+        2. Sign in or create an account
+        3. Create a new API key
+        4. Copy the key and add it using one of the methods above
+        """)
+        
+        # Test API key input
+        st.markdown("### Test Your API Key")
+        api_key_input = st.text_input(
+            "Enter your API key to test:",
+            type="password",
+            placeholder="sk-...",
+            help="This will not be saved, only used for testing"
+        )
+        
+        if st.button("Test API Key", disabled=not api_key_input):
+            with st.spinner("Testing API key..."):
+                if validate_openai_api_key(api_key_input):
+                    st.success("✅ API key is valid! Please add it to your .env file and restart the app.")
+                else:
+                    st.error("❌ Invalid API key. Please check your key and try again.")
+    
+    with col2:
+        st.info("""
+        💡 **Tips:**
+        
+        - Keep your API key secure
+        - Don't share it publicly
+        - Monitor your usage at OpenAI
+        - The app needs internet access
+        """)
+        
+        st.markdown("---")
+        
+        st.markdown("""
+        **Need Help?**
+        
+        - [OpenAI API Documentation](https://platform.openai.com/docs)
+        - [API Key Management](https://platform.openai.com/api-keys)
+        - [Pricing Information](https://openai.com/pricing)
+        """)
+
 # Main application entry point
 def main():
     """Main function to run the Streamlit app."""
     
+    # Load environment variables
+    from dotenv import load_dotenv
+    load_dotenv()
+    
     # Check for OpenAI API key
-    if not os.getenv("OPENAI_API_KEY"):
-        st.error("🔑 OpenAI API key not found!")
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        render_api_key_setup()
+        return
+    
+    # Validate API key
+    if not validate_openai_api_key(api_key):
+        st.error("🔑 Invalid OpenAI API Key!")
         st.markdown("""
-        Please set your OpenAI API key:
+        Your OpenAI API key appears to be invalid. Please check:
         
-        1. Create a `.env` file in the project root
-        2. Add your API key: `OPENAI_API_KEY=your_key_here`
-        3. Restart the application
+        - The key is correctly formatted (starts with 'sk-')
+        - The key hasn't expired
+        - You have sufficient credits/quota
+        - The key has the necessary permissions
         
-        Or set it as an environment variable.
+        Please update your `.env` file with a valid API key and restart the application.
         """)
-        st.stop()
+        
+        # Also show the setup interface
+        st.markdown("---")
+        render_api_key_setup()
+        return
     
     # Initialize and run the app
     app = HRAssistantApp()

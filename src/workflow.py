@@ -209,7 +209,10 @@ class HRAssistantWorkflow:
     
     def _route_after_analysis(self, state: ConversationState) -> str:
         """Route after initial analysis."""
-        if state["stage"] == WorkflowStage.GENERATING_CONTENT:
+        if state.get("ready_for_generation", False):
+            # All information complete from initial analysis, go straight to coordinator for confirmation
+            return "content_generation_coordinator"
+        elif state["stage"] == WorkflowStage.GENERATING_CONTENT:
             return "content_generation_coordinator"
         else:
             return "role_focus"
