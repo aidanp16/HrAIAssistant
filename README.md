@@ -1,6 +1,6 @@
 # HR Assistant - AI-Powered Hiring Planner 🤖
 
-An intelligent HR assistant that helps startups create comprehensive hiring plans using LangGraph and GPT-4. Simply describe your hiring needs, and the assistant will guide you through creating professional hiring materials.
+An intelligent HR assistant that helps startups create comprehensive hiring plans using LangGraph and GPT-4o-mini. Simply describe your hiring needs, and the assistant will guide you through creating professional hiring materials.
 
 ## 🚀 Quick Start
 
@@ -51,10 +51,10 @@ An intelligent HR assistant that helps startups create comprehensive hiring plan
 
 | Technology | Purpose | Why Chosen |
 |------------|---------|------------|
-| **LangGraph** | Workflow orchestration | Provides sophisticated state management and conditional routing for complex multi-step AI workflows |
+| **LangGraph** | Workflow orchestration | Provides state management and conditional routing for complex multi-step AI workflows |
 | **OpenAI GPT-4o-mini** | Content generation & analysis | Cost-effective model with excellent performance for structured content generation |
 | **Streamlit** | Web interface | Rapid prototyping with built-in session management and clean UI components |
-| **Python 3.8+** | Core language | Excellent AI/ML ecosystem and library support |
+| **Python 3.8+** | Core language | Excellent AI ecosystem and library support |
 | **SQLite** | Checkpoint storage | Lightweight, serverless database for workflow state persistence |
 | **ThreadPoolExecutor** | Parallel processing | Enables concurrent generation of multiple documents for faster response times |
 
@@ -84,7 +84,7 @@ graph TB
     M --> N[Completion]
 ```
 
-### Key Design Decisions
+### Design Decisions
 
 1. **Role-by-Role Processing**: Instead of asking all questions at once, the system focuses on one role at a time to simplify question load and improve user experience.
 
