@@ -203,6 +203,8 @@ sequenceDiagram
 ### Technical Improvements
 1. **Generated Content Reuse**: Reuse generated content for similar roles to reduce API calls and amount of total files generated
 2. **Docker Support**: Containerize the application for easier deployment
+3. **Optimized Prompts**: Test different prompt structures to optimize outputs and reduce token usage
+4. **Refactor and Reduce**: Refactor codebase and reduce/optimize code for best possible speed and clarity of code
 
 ### Feature Enhancements
 1. **Automated Job Postings**: Automate the process of posting job descriptions
