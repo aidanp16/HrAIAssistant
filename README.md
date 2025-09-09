@@ -64,6 +64,9 @@ An intelligent HR assistant that helps startups create comprehensive hiring plan
 
 ```mermaid
 graph TB
+    A0[Gather Company Information] -->|First Time Only| A1[Company Profile Setup]
+    A0 -->|Profile Exists| A[User Input]
+    A1 --> A[User Input]
     A[User Input] --> B[Initial Analysis Node]
     B --> C{Has Roles?}
     C -->|Yes| D[Role Focus Node]
