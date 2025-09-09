@@ -206,7 +206,7 @@ sequenceDiagram
 3. **Optimized Prompts**: Test different prompt structures to optimize outputs and reduce token usage
 4. **Refactor and Reduce**: Refactor codebase and reduce/optimize code for best possible speed and clarity of code
 
-### Feature Enhancements
+### Feature Additions
 1. **Automated Job Postings**: Automate the process of posting job descriptions
 2. **Template Customization**: Allow users to customize document templates
 3. **Analytics Dashboard**: Track hiring pipeline metrics and success rates
@@ -225,25 +225,4 @@ sequenceDiagram
 2. **Multiple Roles**: "Hiring a founding engineer and GenAI intern"
 3. **Vague Request**: "I need help with hiring"
 4. **Complete Info**: "Senior dev, $150k budget, 6 weeks, React/Node required"
-
-## 🚨 Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| OpenAI API Error | Verify API key in `.env` file |
-| Import Errors | Ensure virtual environment is activated |
-| Session Not Loading | Check `sessions/` directory permissions |
-| Timeout Errors | Check internet connection and API status |
-| Port Already in Use | Change port with `streamlit run src/app.py --server.port 8502` or end running instance of app |
-
-## 📈 Performance Metrics
-
-- **Response Time**: ~2-3 seconds per LLM call
-- **Document Generation**: ~8 seconds for all 5 documents (parallel)
-
-## 🙏 Acknowledgments
-
-- Built with LangGraph by LangChain
-- Powered by OpenAI's GPT-4o-mini
-- UI framework by Streamlit
 
